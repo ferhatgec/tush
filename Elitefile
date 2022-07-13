@@ -1,0 +1,26 @@
+required_version is 0.1
+
+set bin_path as      "/usr/bin/"
+set output   as      "{bin_path}tush"
+
+set sudo     as      "sudo"
+set compiler as      "cc"
+set flag/s   as link "X11 Xi"
+
+set sources  as      "tush.c"
+
+for signal "start" [
+    for exists "{bin_path}clang" [
+        set compiler as "clang"
+    ]
+
+    for argument "install" [
+        use exec "{sudo} {compiler} {sources} -o {output} {flag/s}"
+
+        for exists "{output}" [
+            println "Installed to {output}"
+        ]
+    ]
+
+    use signal "exit"
+]
