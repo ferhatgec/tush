@@ -31,23 +31,10 @@
 //
 
 
-/*
-NOTE : STRDUP ALLOCATES a new string!!!
-
-this means everytime you do strdup you should be freeing the previous string!
-
-this also means it's slower and uses more ram if you use strdup
-
-(this comment was just made after I noticed how much you use strdup)
-(I will try to find a fix to this, probably by replacing strdup)
-
-
-NOTE :
-
-pretty sure there isn't any way to close the program, this means the window doesn't
-properly close and this may lead to memory leaks
+/* 
+    * TODO: try using much cleaner way than strdup, which allocates new string every call.
+    * FIXME: pretty sure there isn't any way to close the program, this means the window doesn't properly close and this may lead to memory leaks.
 */
-
 
 #include <X11/Xlib.h>
 #include <X11/XKBlib.h>
@@ -58,11 +45,6 @@ properly close and this may lead to memory leaks
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
- 
-/* this is never used */
-#define IMPL_KEY(key) msg = strdup(key); \
-                      val->min_width = tab_width; \
-                      break;
 
 /* 
     not sure what actually to name this
@@ -113,7 +95,6 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    /* not much reason to format your code like that */
     Display* real_display = XOpenDisplay(NULL);
 
     if(!real_display) {
@@ -220,7 +201,7 @@ int main(int argc, char** argv) {
                 }
                 
             case 'o':
-                // TODO: Check given argument is valid
+                /* TODO: Check given argument is valid */
                 alpha = atof(argv[++i]);
                 break;
             
@@ -292,7 +273,7 @@ int main(int argc, char** argv) {
         group = state.group;
     }                                                              
     
-    // XSetWMSizeHints(real_display, real_window, val, XA_WM_NORMAL_HINTS);
+    /* XSetWMSizeHints(real_display, real_window, val, XA_WM_NORMAL_HINTS); */
     XSelectInput(real_display, real_window, KeyReleaseMask | KeyPressMask);
 
     /* 
@@ -309,13 +290,7 @@ int main(int argc, char** argv) {
 
     font_structure = XLoadQueryFont(real_display, font);
 
-    /* 
-        I got an seg fault because !font_stucture wasn't caught 
-    
-        also, I didn't have the font on my system and needed to install 
-        a package for it, so I added a note on the README
-    */
-
+    /* thanks to @ColleagueRiley for adding !font_structure, which contains fix for segmentation fault somehow. */
     if(!font || !font_structure) { 
         fprintf(stderr, "cannot load font: '%s'\n", font);
         return 1;
@@ -333,11 +308,9 @@ int main(int argc, char** argv) {
     XCharStruct overall;
 
     /* 
-        strlen(msg) is quite slow, it's better to use the size if we know what it is 
-    
-        we know it is 2.
+        strlen(msg) is quite slow, it's better to use the size if we know what it is. 
+    	we know it is 2.
     */
-    
     XTextExtents(font_structure, msg, 2, 
                 &direction, &ascent, &descent, &overall);
 
@@ -361,22 +334,13 @@ int main(int argc, char** argv) {
             change_opacity(real_display, &real_window, alpha);
         }
 
-        /* 
-            not actually sure why you use the Xi raw 
-            event system here
-            I'd think you could've used pure Xlib
-
-            ¯\_(ツ)_/¯
-        */
-
+        /* using directly xlib much cleaner way than xinput2 */
         XNextEvent(real_display, &event);
 
         /* 
             if we check !XGetEventData here instead of waiting for the else, we can just skip the nesting
-
             this makes the code a bit cleaner, not sure if it does much for the actual performance
         */
-
         if (!XGetEventData(real_display, cookie)) {
             if(event.type == xkbEventCode) {
                 XkbEvent *xkbEvent = (XkbEvent*)&event;
@@ -388,7 +352,7 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        // Handle key press and release events
+        /* Handle key press and release events */
         if (cookie->type == GenericEvent
                 && cookie->extension == xiOpcode
                 && (cookie->evtype == XI_RawKeyRelease /* not much reason to have this in it's own if statement */
@@ -397,31 +361,23 @@ int main(int argc, char** argv) {
                 XIRawEvent *ev = cookie->data;
 
                 KeySym s = XkbKeycodeToKeysym(
-                        real_display, ev->detail, group, 0 /*shift level*/);
+                        real_display, ev->detail, group, 0 /* shift level */);
 
                 if (NoSymbol == s) {
                     if (group == 0) continue;
                     else {
                         s = XkbKeycodeToKeysym(real_display, ev->detail,
-                                0 /* base group */, 0 /*shift level*/);
+                                0 /* base group */, 0 /* shift leve l*/);
                         if (NoSymbol == s) continue;
                     }
                 }    
 
                 change_opacity(real_display, &real_window, alpha);
 
-                /* 
-                    the switch is useless if there's only a default argument  
-                
-                    let's fix that!
-                */
-
                 /*
-                    keycodes should be used here because
-                    comparing the keycode is 100% faster
-                    than comparing strings
+                    keycodes should be used here because comparing the keycode is 100% faster
+                    than comparing strings.
                 */
-
                 char* str;
                 size_t len = 1;
 
@@ -470,11 +426,6 @@ int main(int argc, char** argv) {
                         break;
                 }   
 
-                /* 
-                    switched to this array system
-                    so you're not repeating the same block of code 100 times 
-                */
-               
                 struct {const char* font; int num;} fonts[] = {
                                     {"-misc-fixed-bold-r-normal--135-0-1300-1300-c-0-iso8859-13", 7}, 
                                     {"-misc-fixed-bold-r-normal--130-0-1300-1300-c-0-iso8859-13", 8}, 
