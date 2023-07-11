@@ -30,6 +30,25 @@
 //
 //
 
+
+/*
+NOTE : STRDUP ALLOCATES a new string!!!
+
+this means everytime you do strdup you should be freeing the previous string!
+
+this also means it's slower and uses more ram if you use strdup
+
+(this comment was just made after I noticed how much you use strdup)
+(I will try to find a fix to this, probably by replacing strdup)
+
+
+NOTE :
+
+pretty sure there isn't any way to close the program, this means the window doesn't
+properly close and this may lead to memory leaks
+*/
+
+
 #include <X11/Xlib.h>
 #include <X11/XKBlib.h>
 #include <X11/Xutil.h>
@@ -39,15 +58,39 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
-
-
+ 
+/* this is never used */
 #define IMPL_KEY(key) msg = strdup(key); \
                       val->min_width = tab_width; \
                       break;
 
+/* 
+    not sure what actually to name this
+    but it's so long and weird that it'd probably be better to give 
+    make it a constant rather than just putting it in the code
+*/
+
+/* 
+    enforcing, objectively, the best c string size check so it works as fast as it can 
+    [
+        note: most effective form of protection is abstinence, so 
+        using a char* header method (or having a int with the char*)
+        would be the best way
+    ]
+*/
+size_t cstrlen(const char* cstr) {
+	char* s;
+	for (s = (char*)cstr; *s; s++);
+
+	return (s - cstr);
+}
+
+#define BASE_ALPHA 0xFFFFFFFFul
+
 void change_opacity(Display* display, Window* window, double alpha) {
-    unsigned long opacity = (unsigned long)(0xFFFFFFFFul * alpha);
+    unsigned long opacity = (unsigned long)(BASE_ALPHA * alpha);
     Atom XA_NET_WM_WINDOW_OPACITY = XInternAtom(display, "_NET_WM_WINDOW_OPACITY", False);
+
     XChangeProperty(display, *window, XA_NET_WM_WINDOW_OPACITY, XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&opacity, 1L);
 }
 
@@ -69,8 +112,9 @@ int main(int argc, char** argv) {
                " -o .opacity.\n", argv[0]);
         return 1;
     }
-
-    Display* real_display; real_display = XOpenDisplay(NULL);
+    
+    /* not much reason to format your code like that */
+    Display* real_display = XOpenDisplay(NULL);
 
     if(!real_display) {
         fprintf(stderr, "cannot open display\n");
@@ -85,9 +129,17 @@ int main(int argc, char** argv) {
 
     XFontStruct* font_structure;
 
-    char* msg = (char*)malloc(64); msg = (char*)"hi";
+    /* 
+        since the standard string size is going to be 64, let's not allocate in the first place
+        
+        1) allocating is slower than this
+        2) this just uses stack data so far less ram ussage
+    */
+
+    char msg[64] = "hi";
+
     char* font = "-misc-fixed-bold-r-normal--130-0-950-950-c-0-iso8859-13";
-    
+     
     int real_s;
 
     double alpha = 0.9;
@@ -125,21 +177,54 @@ int main(int argc, char** argv) {
                     token = "990";
                 } ++count;
             }
-        } else */if((strcmp(argv[i], "-r") == 0) && i + 1 < argc) {
-            text_color.red = atoi(argv[++i]);
-        } if((strcmp(argv[i], "-g")) && i + 1 < argc) {
-            text_color.green = atoi(argv[++i]);
-        } if((strcmp(argv[i], "-b") == 0) && i + 1 < argc) {
-            text_color.blue = atoi(argv[++i]);
-        } if((strcmp(argv[i], "-br") == 0) && i + 1 < argc) {
-            background_color.red = atoi(argv[++i]);
-        } if((strcmp(argv[i], "-bg") == 0) && i + 1 < argc) {
-            background_color.green = atoi(argv[++i]);
-        } if((strcmp(argv[i], "-bb") == 0) && i + 1 < argc) {
-            background_color.blue = atoi(argv[++i]);
-        } if((strcmp(argv[i], "-o") == 0) && i + 1 < argc) {
-            // TODO: Check given argument is valid
-            alpha = atof(argv[++i]);
+        } else */
+        
+        /* 
+            strcmp is kinda slow 
+            plus we're only looking for a one char thing [in most cases]
+
+            so, I'll replace this part just by checking if there is a 
+            '-'
+            then check what the next char is
+        */
+
+        /* cstrlen is still kinda slow [just because it's a for loop] so it's best to only check once */
+        size_t argLen = cstrlen(argv[i]);
+
+        if (argv[i][0] != '-' || i + 1 >= argc || 
+            (argv[i][1] > 'b' && argLen > 2) || 
+            (argv[i][1] == 'b' && cstrlen(argv[i]) > 3)
+        )
+            continue;
+
+        switch (argv[i][1]) {
+            case 'r':
+                text_color.red = atoi(argv[++i]);
+            case 'g':
+                text_color.green = atoi(argv[++i]);
+            case 'b':
+                switch (argv[i][2]) {
+                    case 'r':
+                        background_color.red = atoi(argv[++i]);
+                        break;
+                    case 'g':
+                        background_color.green = atoi(argv[++i]);
+                        break;
+                    case 'b':
+                        background_color.blue = atoi(argv[++i]);
+                        break;
+                    default:
+                        if (argLen == 2)
+                            text_color.blue = atoi(argv[++i]);
+                        break;
+                }
+                
+            case 'o':
+                // TODO: Check given argument is valid
+                alpha = atof(argv[++i]);
+                break;
+            
+            default: break;
         }
     }
 
@@ -209,11 +294,29 @@ int main(int argc, char** argv) {
     
     // XSetWMSizeHints(real_display, real_window, val, XA_WM_NORMAL_HINTS);
     XSelectInput(real_display, real_window, KeyReleaseMask | KeyPressMask);
+
+    /* 
+        this should be done before the window maps
+        otherwise there is a bug inwhich 
+        the window is rendered with a border still
+    */
+
+    Atom window_type = XInternAtom(real_display, "_NET_WM_WINDOW_TYPE", False);
+    long value = XInternAtom(real_display, "_NET_WM_WINDOW_TYPE_DOCK", False);
+    XChangeProperty(real_display, real_window, window_type, XA_ATOM, 32, PropModeReplace, (unsigned char *) &value, 1);
+
     XMapWindow(real_display, real_window);
 
     font_structure = XLoadQueryFont(real_display, font);
 
-    if(!font) { 
+    /* 
+        I got an seg fault because !font_stucture wasn't caught 
+    
+        also, I didn't have the font on my system and needed to install 
+        a package for it, so I added a note on the README
+    */
+
+    if(!font || !font_structure) { 
         fprintf(stderr, "cannot load font: '%s'\n", font);
         return 1;
     }
@@ -229,17 +332,20 @@ int main(int argc, char** argv) {
     
     XCharStruct overall;
 
-    XTextExtents(font_structure, msg, strlen(msg), 
+    /* 
+        strlen(msg) is quite slow, it's better to use the size if we know what it is 
+    
+        we know it is 2.
+    */
+    
+    XTextExtents(font_structure, msg, 2, 
                 &direction, &ascent, &descent, &overall);
-    
+
     XWindowAttributes ra;
-    Atom window_type = XInternAtom(real_display, "_NET_WM_WINDOW_TYPE", False);
-    long value = XInternAtom(real_display, "_NET_WM_WINDOW_TYPE_DOCK", False);
-    
+
     unsigned long x_axis = XWidthOfScreen(DefaultScreenOfDisplay(real_display)) / 3,
                   y_axis = 3 * XHeightOfScreen(DefaultScreenOfDisplay(real_display)) / 4;
 
-    XChangeProperty(real_display, real_window, window_type, XA_ATOM, 32, PropModeReplace, (unsigned char *) &value, 1);
     XMoveWindow(real_display, real_window, x_axis, y_axis);
     
     change_opacity(real_display, &real_window, 0.0);
@@ -255,357 +361,167 @@ int main(int argc, char** argv) {
             change_opacity(real_display, &real_window, alpha);
         }
 
+        /* 
+            not actually sure why you use the Xi raw 
+            event system here
+            I'd think you could've used pure Xlib
+
+            ¯\_(ツ)_/¯
+        */
+
         XNextEvent(real_display, &event);
-        if (XGetEventData(real_display, cookie)) {
-            // Handle key press and release events
-            if (cookie->type == GenericEvent
-                    && cookie->extension == xiOpcode) {
-                if (cookie->evtype == XI_RawKeyRelease
-                        || cookie->evtype == XI_RawKeyPress) {
-                    XIRawEvent *ev = cookie->data;
 
-                    KeySym s = XkbKeycodeToKeysym(
-                            real_display, ev->detail, group, 0 /*shift level*/);
+        /* 
+            if we check !XGetEventData here instead of waiting for the else, we can just skip the nesting
 
-                    if (NoSymbol == s) {
-                        if (group == 0) continue;
-                        else {
-                            s = XkbKeycodeToKeysym(real_display, ev->detail,
-                                    0 /* base group */, 0 /*shift level*/);
-                            if (NoSymbol == s) continue;
-                        }
-                    }
-                    char *str = XKeysymToString(s);          
-                    if (NULL == str) continue;
-                    change_opacity(real_display, &real_window, alpha);
+            this makes the code a bit cleaner, not sure if it does much for the actual performance
+        */
 
-                    switch(ev->detail) {
-                        default: {
-                            size_t len = strlen(str);
-
-                            if(len == 1) {
-                                ret: font = "-misc-fixed-bold-r-normal--135-0-1300-1300-c-0-iso8859-13";
-                                font_structure = XLoadQueryFont(real_display, font);
-                                
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-                                XClearWindow(real_display, real_window);
-                                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 7, 
-                                                            ra.height / 8, 
-                                                            str, len);
-
-                                break;
-                            } else if(len == 2) {
-                                font = "-misc-fixed-bold-r-normal--130-0-1300-1300-c-0-iso8859-13";
-                                font_structure = XLoadQueryFont(real_display, font);
-                                
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-
-                                XClearWindow(real_display, real_window);
-                                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 8, 
-                                                            ra.height / 8, 
-                                                            str, len);
-
-                                break;
-                            } else if(len == 3) {
-                                font = "-misc-fixed-bold-r-normal--125-0-1300-1300-c-0-iso8859-13";
-                                font_structure = XLoadQueryFont(real_display, font);
-
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-                                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-                                XClearWindow(real_display, real_window);
-                                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 12, 
-                                                            ra.height / 8,
-                                                              str, len);
-                                break;
-                            } else if(len == 4) {
-                                font = "-misc-fixed-bold-r-normal--120-0-950-950-c-0-iso8859-13";
-                                font_structure = XLoadQueryFont(real_display, font);
-                                
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-                                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-                                XClearWindow(real_display, real_window);
-                                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 20,
-                                                            ra.height / 8, 
-                                                            str, len); 
-                                break;
-                            } else if(len == 5) {
-                                if(strcmp(str, "grave") == 0) {
-                                    str = strdup("`"); len = 1; goto ret;    
-                                } else if(strcmp(str, "comma") == 0) {
-                                    str = strdup(","); len = 1; goto ret;
-                                } else if(strcmp(str, "slash") == 0) {
-                                    str = strdup("/"); len = 1; goto ret;
-                                } else if(strcmp(str, "equal") == 0) {
-                                    str = strdup("="); len = 1; goto ret;  
-                                } else if(strcmp(str, "minus") == 0) {
-                                    str = strdup("-"); len = 1; goto ret;    
-                                } else if(strcmp(str, "space") == 0) {
-                                    str = strdup("Space");
-                                } else if(strcmp(str, "KP_Up") == 0) {
-                                    XMoveWindow(real_display, real_window, x_axis, y_axis - 10);
-                                    y_axis -= 10;
-                                }
-
-                                font = "-misc-fixed-bold-r-normal--115-0-950-950-c-0-iso8859-13";
-                                font_structure = XLoadQueryFont(real_display, font);
-                                
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-                                XClearWindow(real_display, real_window);
-                                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 25, 
-                                                            ra.height / 8, 
-                                                            str, len);
-                                break;
-                            } else if(len == 6) {
-                                if(strcmp(str, "period") == 0) {
-                                    str = strdup("."); len = 1; goto ret;    
-                                }
-
-                                font = "-misc-fixed-bold-r-normal--110-0-950-950-c-0-iso8859-13";
-                                font_structure = XLoadQueryFont(real_display, font);
-                                
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                            
-                                XClearWindow(real_display, real_window);
-                                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 50, 
-                                                            ra.height / 8, 
-                                                            str, len);
-                                break;
-                            } else if(len == 7) {
-                                if(strcmp(str, "KP_Left") == 0) {
-                                    XMoveWindow(real_display, real_window, x_axis - 10, y_axis);
-                                    x_axis -= 10;
-                                } else if(strcmp(str, "KP_Down") == 0) {
-                                    XMoveWindow(real_display, real_window, x_axis, y_axis + 10);
-                                    y_axis += 10;
-                                }
-
-                                font = "-misc-fixed-bold-r-normal--95-0-950-950-c-0-iso8859-13";
-                                font_structure = XLoadQueryFont(real_display, font);
-                                
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                            
-                                XClearWindow(real_display, real_window);
-                                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 50, 
-                                                            ra.height / 8, 
-                                                            str, len);
-                                break;
-                            } else if(len == 8) {
-                                if(strcmp(str, "KP_Right") == 0) {
-                                    XMoveWindow(real_display, real_window, x_axis + 10, y_axis);
-                                    x_axis += 10;
-                                }
-                                
-                                font = "-misc-fixed-bold-r-normal--85-0-950-950-c-0-iso8859-13";
-                                font_structure = XLoadQueryFont(real_display, font);
-                                
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                            
-                                XClearWindow(real_display, real_window);
-                                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 50, 
-                                                            ra.height / 8, 
-                                                            str, len);
-                                break;
-                            } else if(len == 9) {
-                                if(strcmp(str, "backslash") == 0) {
-                                    str = strdup("\\"); len = 1; goto ret;    
-                                } else if(strcmp(str, "semicolon") == 0) {
-                                    str = strdup(";"); len = 1; goto ret;
-                                }
-
-                                font = "-misc-fixed-bold-r-normal--75-0-950-950-c-0-iso8859-13";
-                                font_structure = XLoadQueryFont(real_display, font);
-                                
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                            
-                                XClearWindow(real_display, real_window);
-                                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 55, 
-                                                            ra.height / 8, 
-                                                            str, len);
-                                break;  
-                            } else if(len == 10) {
-                                if(strcmp(str, "apostrophe") == 0) {
-                                    str = strdup("\'"); len = 1; goto ret;
-                                }
-
-                                font = "-misc-fixed-bold-r-normal--65-0-950-950-c-0-iso8859-13";
-                                font_structure = XLoadQueryFont(real_display, font);
-                                
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                            
-                                XClearWindow(real_display, real_window);
-                                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 55, 
-                                                            ra.height / 8, 
-                                                            str, len);
-                                break;  
-                            } else if(len == 11) {
-                                if(strcmp(str, "bracketleft") == 0) {
-                                    str = strdup("["); len = 1; goto ret;
-                                }
-                                
-                                font = "-misc-fixed-bold-r-normal--60-0-950-950-c-0-iso8859-13";
-                                font_structure = XLoadQueryFont(real_display, font);
-                                
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-                                XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                            
-                                XClearWindow(real_display, real_window);
-                                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 55, 
-                                                            ra.height / 8, 
-                                                            str, len);
-                                break;
-                            } else if(strcmp(str, "bracketright") == 0) {
-                                str = strdup("]"); len = 1; goto ret;
-                            } else {
-                                font = "-misc-fixed-bold-r-normal--130-0-950-950-c-0-iso8859-13";
-                            }
-
-                            
-                            font_structure = XLoadQueryFont(real_display, font);
-                                
-                            XTextExtents(font_structure, str, len, 
-                                                       &direction, 
-                                                        &ascent, 
-                                                        &descent, 
-                                                        &overall);
-
-                            XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
-
-                            XTextExtents(font_structure, str, len, 
-                                                            &direction, 
-                                                            &ascent, 
-                                                            &descent, 
-                                                            &overall);
-
-                            
-                            XClearWindow(real_display, real_window);
-                            XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / 20, 
-                                                            ra.height / 8, 
-                                                            str, len);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            XFreeEventData(real_display, cookie);
-        } else {
+        if (!XGetEventData(real_display, cookie)) {
             if(event.type == xkbEventCode) {
                 XkbEvent *xkbEvent = (XkbEvent*)&event;
                 if (xkbEvent->any.xkb_type == XkbStateNotify) {
                     group = xkbEvent->state.group;
                 }
             }
-        }
-    }
 
-    free(msg);
+            continue;
+        }
+
+        // Handle key press and release events
+        if (cookie->type == GenericEvent
+                && cookie->extension == xiOpcode
+                && (cookie->evtype == XI_RawKeyRelease /* not much reason to have this in it's own if statement */
+            || cookie->evtype == XI_RawKeyPress)) {
+                
+                XIRawEvent *ev = cookie->data;
+
+                KeySym s = XkbKeycodeToKeysym(
+                        real_display, ev->detail, group, 0 /*shift level*/);
+
+                if (NoSymbol == s) {
+                    if (group == 0) continue;
+                    else {
+                        s = XkbKeycodeToKeysym(real_display, ev->detail,
+                                0 /* base group */, 0 /*shift level*/);
+                        if (NoSymbol == s) continue;
+                    }
+                }    
+
+                change_opacity(real_display, &real_window, alpha);
+
+                /* 
+                    the switch is useless if there's only a default argument  
+                
+                    let's fix that!
+                */
+
+                /*
+                    keycodes should be used here because
+                    comparing the keycode is 100% faster
+                    than comparing strings
+                */
+
+                char* str;
+                size_t len = 1;
+
+                switch(s) {
+                    case XK_grave:
+                        str = "`"; break;
+                    case XK_comma:
+                        str = ","; break;
+                    case XK_slash:
+                        str = "/"; break;
+                    case XK_equal:
+                        str = "="; break;
+                    case XK_minus:
+                        str = "-"; break;
+                    case XK_period: str = "."; break;
+                    case XK_backslash:
+                        str = "\\";    
+                        break;
+                    case XK_semicolon:
+                        str = ";";
+                        break;
+                    case XK_apostrophe:
+                        str = "'";
+                        break; 
+                    case XK_bracketleft:
+                        str = "[";
+                        break; 
+                    case XK_bracketright:
+                        str = "]";
+                    case XK_space:
+                        str = "String";
+                        len = 6;
+                        break;
+                    case XK_KP_Up:
+                    case XK_KP_Left:
+                    case XK_KP_Down:
+                    case XK_KP_Right:
+                        x_axis += (s == XK_KP_Left) ? -10 : (s == XK_KP_Right) ? 10 : 0;
+                        y_axis += (s == XK_KP_Down) ? 10 : (s == XK_KP_Up) ? -10 : 0;
+                        XMoveWindow(real_display, real_window, x_axis, y_axis);
+
+                    default: 
+                        str =  XKeysymToString(s);
+
+                        len = cstrlen(str); 
+                        break;
+                }   
+
+                /* 
+                    switched to this array system
+                    so you're not repeating the same block of code 100 times 
+                */
+               
+                struct {const char* font; int num;} fonts[] = {
+                                    {"-misc-fixed-bold-r-normal--135-0-1300-1300-c-0-iso8859-13", 7}, 
+                                    {"-misc-fixed-bold-r-normal--130-0-1300-1300-c-0-iso8859-13", 8}, 
+                                    {"-misc-fixed-bold-r-normal--125-0-1300-1300-c-0-iso8859-13", 12},
+                                    {"-misc-fixed-bold-r-normal--120-0-950-950-c-0-iso8859-13", 20},
+                                    {"-misc-fixed-bold-r-normal--115-0-950-950-c-0-iso8859-13", 25},
+                                    {"-misc-fixed-bold-r-normal--110-0-950-950-c-0-iso8859-13", 50},
+                                    {"-misc-fixed-bold-r-normal--95-0-950-950-c-0-iso8859-13", 50},
+                                    {"-misc-fixed-bold-r-normal--85-0-950-950-c-0-iso8859-13", 50},
+                                    {"-misc-fixed-bold-r-normal--75-0-950-950-c-0-iso8859-13", 55},
+                                    {"-misc-fixed-bold-r-normal--65-0-950-950-c-0-iso8859-13", 55},
+                                    {"-misc-fixed-bold-r-normal--60-0-950-950-c-0-iso8859-13", 55}
+                                };
+
+                int num = 20;
+                font = "-misc-fixed-bold-r-normal--130-0-950-950-c-0-iso8859-13";
+
+                if (len >= 1 && len <= 11) {
+                    font = (char*)fonts[len - 1].font;
+                    num = fonts[len - 1].num;
+                }
+
+                font_structure = XLoadQueryFont(real_display, font);
+                    
+                XTextExtents(font_structure, str, len, 
+                                            &direction, 
+                                            &ascent, 
+                                            &descent, 
+                                            &overall);
+
+                XSetFont(real_display, DefaultGC(real_display, real_s), font_structure->fid);    
+
+                XTextExtents(font_structure, str, len, 
+                                                &direction, 
+                                                &ascent, 
+                                                &descent, 
+                                                &overall);
+
+                
+                XClearWindow(real_display, real_window);
+                XDrawString(real_display, real_window, DefaultGC(real_display, real_s), ra.width / num, 
+                                                ra.height / 8, 
+                                                str, len);
+
+                XFreeEventData(real_display, cookie);
+            }
+    }
+    
     XCloseDisplay(real_display);
 }
