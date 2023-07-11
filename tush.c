@@ -436,8 +436,6 @@ int main(int argc, char** argv) {
                         str = "="; break;
                     case XK_minus:
                         str = "-"; break;
-                    case XK_space:
-                        str[0] = 'S'; break;
                     case XK_period: str = "."; break;
                     case XK_backslash:
                         str = "\\";    
@@ -453,7 +451,10 @@ int main(int argc, char** argv) {
                         break; 
                     case XK_bracketright:
                         str = "]";
-
+                    case XK_space:
+                        str = "String";
+                        len = 6;
+                        break;
                     case XK_KP_Up:
                     case XK_KP_Left:
                     case XK_KP_Down:
@@ -464,6 +465,7 @@ int main(int argc, char** argv) {
 
                     default: 
                         str =  XKeysymToString(s);
+
                         len = cstrlen(str); 
                         break;
                 }   
@@ -491,8 +493,8 @@ int main(int argc, char** argv) {
                 font = "-misc-fixed-bold-r-normal--130-0-950-950-c-0-iso8859-13";
 
                 if (len >= 1 && len <= 11) {
-                    font = (char*)fonts[len].font;
-                    num = fonts[len].num;
+                    font = (char*)fonts[len - 1].font;
+                    num = fonts[len - 1].num;
                 }
 
                 font_structure = XLoadQueryFont(real_display, font);
