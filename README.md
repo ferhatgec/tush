@@ -8,6 +8,7 @@ external requirements:
 
 libX11
 libXi (version 2)
+X11 fonts
 elite (for build)
 c compiler
 
